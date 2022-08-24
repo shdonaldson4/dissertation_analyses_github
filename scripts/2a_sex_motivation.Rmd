@@ -1,0 +1,224 @@
+---
+title: "Sex Motivation EFA"
+author: "Sarah Donaldson"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r load packages, include-FALSE}
+library(knitr)
+library(psych)
+library(dplyr)
+library(here)
+library(rio)
+library(psych)
+library(corrplot)
+library(parameters)
+library(nFactors)
+library(ggplot2)
+library(expss)
+library(ltm)
+library(GPArotation)
+library(mice)
+library(tidyverse)
+library(janitor)
+
+
+
+#control^M for piping
+#commandM for run
+#^commandc for # multiple lines
+
+```
+
+```{r import, include=FALSE}
+
+fsmi <- import(here("data", "fsmi_w3_mate.csv"))
+ksrq <- import(here("data", "ksrq_w3_mate.csv"))
+
+```
+
+# Data Prep and Descriptives
+
+##Clean and combine the data
+```{r cleaning}
+
+# #Convert tagid to a factor; convert intergers to numberic, reverse code.
+fsmi_clean <- fsmi %>%
+  mutate(tagid = as.factor(tagid)) %>% 
+  mutate(FSMI_7_37 = as.numeric(FSMI_7_37))%>% 
+  mutate(FSMI_7_38 = as.numeric(FSMI_7_38))%>% 
+  mutate(FSMI_7_39 = as.numeric(FSMI_7_39))%>% 
+  mutate(FSMI_7_40 = as.numeric(FSMI_7_40))%>% 
+  mutate(FSMI_7_41 = as.numeric(FSMI_7_41))%>% 
+  mutate(FSMI_7_42 = as.numeric(FSMI_7_42))
+
+ksrq_clean <- ksrq %>%
+  mutate(tagid = as.factor(tagid)) %>% 
+  mutate(K_SRQ_9 = as.numeric(K_SRQ_9))%>% 
+  mutate(K_SRQ_19 = as.numeric(K_SRQ_19))%>% 
+  mutate(K_SRQ_23 = as.numeric(K_SRQ_23))
+
+efa_clean <- merge(fsmi_clean, ksrq_clean, by = "tagid")
+
+```
+
+##Impute missing values using the mean
+```{r impute}
+#Impute missing data using mean values
+
+library(mice)
+impdata <- mice(efa_clean,m=5,maxit=50,meth='pmm',seed=500)
+summary(impdata)
+
+efa_imp <- complete(impdata,1)
+
+
+write.csv(efa_imp, "/Users/sarahd/Dropbox/UOregon/Pfeiffer Lab/Dissssssss/dissertation_analyses/data/efa_imp.csv")
+
+```
+
+##Calculate individual scores and get descriptives
+```{r descriptives}
+
+
+fsmi_full <- import(here("data", "fsmi_w3.csv"))
+# Participants in romantic relationships explored in Jamovi
+
+
+efa_imp <- import(here("data", "efa_imp.csv"))
+
+efa_imp$mate_seeking <- rowMeans(efa_imp[,c("FSMI_7_37",
+                                            "FSMI_7_38",
+                                            "FSMI_7_39",
+                                            "FSMI_7_40",
+                                            "FSMI_7_41",
+                                            "FSMI_7_42")], na.rm = T)
+
+
+efa_imp$sex_rel <- rowMeans(efa_imp[,c("K_SRQ_9",
+                                       "K_SRQ_19",
+                                       "K_SRQ_23")], na.rm = T)
+
+
+#Also done in Jamovi
+describe(efa_imp, mate_seeking)
+describe(efa_imp, sex_rel)
+
+#Look at number of folks in a current relationship
+
+```
+
+#Run the EFA
+
+##Correlations and Assumptions
+```{r assumptions}
+#Correlation Matrix - look at correlations between items to see if efa is even worth it / justified
+
+efa_items <- efa_imp %>%
+  dplyr::select(FSMI_7_37:FSMI_7_42,
+                K_SRQ_9, K_SRQ_19, K_SRQ_23)
+
+# cor_data_matrix <- cor(efa_items)
+# 
+# corrplot::corrplot(cor_data_matrix, method="color")
+# corrplot(cor_data_matrix, method="number")
+
+items_corr <- efa_items %>% 
+  rename("FSMI Time Thinking" = FSMI_7_37,
+         "FSMI Interested" = FSMI_7_38,
+         "FSMI Not Interested(r)" = FSMI_7_39,
+         "FSMI High Priority" = FSMI_7_40,
+         "FSMI Rarely Think(r)" = FSMI_7_41,
+         "FSMI Would Like" = FSMI_7_42,
+         "K-SRQ Crush" = K_SRQ_9,
+         "K-SRQ Flirting" = K_SRQ_19,
+         "K-SRQ Kissing" = K_SRQ_23)
+cor_matrix_all <- cor(items_corr)
+cor_matrix_all
+
+corrplot::corrplot(cor_matrix_all, 
+        method = "color",
+        tl.cex = .85,
+         tl.col = 'black',
+         addgrid.col = 'white',
+         addCoef.col = 'grey50',
+        type = 'lower')
+
+
+#check if efa should be run
+check_factorstructure(efa_items)
+
+
+#what number of factors are advisable - what is recommended number of factors
+factors_exp <- n_factors(efa_items)
+factors_exp
+#This reveals 8 factors in this dataset
+
+```
+
+#EFA
+
+```{r}
+#Force an EFA of 1 factor - 1 factor EFA
+
+efa_1fac <- psych::fa(efa_items, nfactors = 1) %>%
+  model_parameters(sort = TRUE, threshold = "max")
+efa_1fac
+
+#Force an EFA of 1 factor - 1 factor EFA
+
+efa_2fac <- psych::fa(efa_items, nfactors = 2) %>%
+  model_parameters(sort = TRUE, threshold = "max")
+efa_2fac
+
+#EFA factor loading cutoff by sample size. 150=.45; 120=.50
+
+
+#Check reliability (alpha)
+
+```
+
+# Scree Plot - didn't work
+
+```{r}
+screeplot <- fa(data_efa_clean, nfactors = ncol(X), rotate = "none")
+n_factors <- length(screeplot$e.values)
+scree     <- data.frame(
+  Factor_n =  as.factor(1:n_factors), 
+  Eigenvalue = screeplot$e.values)
+ggplot(scree, aes(x = Factor_n, y = Eigenvalue, group = 1)) + 
+  geom_point() + geom_line() +
+  xlab("Number of factors") +
+  ylab("Initial eigenvalue") +
+  labs( title = "Scree Plot", 
+        subtitle = "(Based on the unreduced correlation matrix)")
+
+```
+
+# RUN A PCA instead - data reduction method
+```{r}
+
+#pca
+pca <- pca(cor_data_matrix,
+              nfactors = 2)
+print(pca)
+summary(pca)
+
+?pca
+
+#checking factorability
+KMO(r=cor(impdata_items[,])) #welp, thats the problem. fsmi isn't factorable. so... thoughts?
+
+
+
+```
+

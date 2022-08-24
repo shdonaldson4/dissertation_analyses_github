@@ -1,0 +1,313 @@
+---
+title: "Dissertation 2A: EFA & PCA"
+author: "Sarah Donaldson"
+date: "5/7/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r load packages}
+library(knitr)
+library(psych)
+library(dplyr)
+library(here)
+library(rio)
+library(psych)
+library(corrplot)
+library(parameters)
+library(nFactors)
+library(ggplot2)
+library(expss)
+library(ltm)
+library(GPArotation)
+library(mice)
+library(tidyverse)
+
+```
+
+#control^M for piping
+#commandM for run
+#^commandc for # multiple lines
+
+## Import
+
+```{r import}
+#Import, then remove top 2 rows, and all the columns I'm not going to use/look at
+
+# raw_data_fsmi <- import(here("data", "FSMI_W3.csv"))
+# raw_data_dropped <- raw_data[-c(1, 2),]
+# raw_data_dropped <- select(raw_data_dropped, -`BFNES_1`:-`R_SCS_C_29`)
+# raw_data_dropped <- select(raw_data_dropped, -`StartDate`:-`DistributionChannel`)
+# raw_data_dropped <- select(raw_data_dropped, -`CES_DC_1`:-`CES_DC_20`)
+
+sos <- import(here("data", "sos_clean.csv"))
+
+```
+
+
+# Data Cleaning - Katie
+
+```{r cleaning}
+
+# #Convert SID to a factor; questionnaire columns to numbers.
+raw_data_clean <- raw_data_dropped %>%
+  mutate(SID = as.factor(SID)) %>%
+  mutate_at(c("FSMI_1":"K-SOIR_12"), as.numeric())
+#   
+# 
+# #Reverse Coding
+# 
+# raw_data_rev <- raw_data_clean %>%
+#   mutate_at(c("FSMI_7_39", "FSMI_7_40", "FSMI_7_41", "FSMI_7_51", "FSMI_7_52", "FSMI_7_53", "FSMI_7_54"),
+#             list(~dplyr::recode(., `1`=7,
+#                         `2`=6,
+#                         `3`=5,
+#                         `4`=4,
+#                         `5`=3,
+#                         `6`=2,
+#                         `7`=1))) %>% 
+#   mutate(`K-SOIR_9` = (dplyr::recode(`K-SOIR_9`, `5`=1,
+#                                `4`=2,
+#                                `3`=3,
+#                                `2`=4,
+#                                `1`=5)))
+#   
+# 
+# 
+
+```
+
+#SOS Cross Tabs
+```{r}
+#How many ppl have "hooked up"?
+xtabs(~K.SOIR_1, data=sos) #yes=22, no=51, unsure=2, missing=2
+#How many ppl have had sex?
+xtabs(~K.SOIR_2, data=sos) #yes=4, no=46, unsure=1, missing=26
+#note... skip logic was f-ed. this is probably yes=4, no=70, unsure=1, missing=2
+#How many ppl have ever had a romantic relationship?
+xtabs(~FSMI_1, data = sos) #yes=8+22=30, no=15+32=47 
+#8 sos subjects in a current romantic relationship
+xtabs(~FSMI_2 + FSMI_1, data = sos) #of those 8 ppl, half had current relationships that were less than a month old.
+xtabs(~FSMI_3 + FSMI_1, data = sos) 
+#of the 30 ppl who had ever had a romantic relationship, 2ppl=0 relationships, 5ppl=1 relationship, 
+#9ppl=2 relationships, 4ppl=3 relationships, 5ppl=4 relationships, 3ppl=5 relationships, 2ppl=7 relationships
+#Orientation label?
+xtabs(~FSMI_4, data=sos) # 33ppl=het, 2ppl=gay, 4ppl=bi, 5ppl=unsure, 3ppl=identity not listed, 30ppl=no response
+#Orientation scale?
+xtabs(~FSMI_5, data=sos) # 0ppl=only attracted to F, 3ppl=mostly attracted to F, 4ppl=equally attracted to M & F, 9ppl=mostly attracted to M, 29ppl=only attracted to M, 2ppl=not sure, 30ppl=no response
+#Participant gender?
+xtabs(~FSMI_6, data=sos) # 2ppl=M, 70ppl=F, 2ppl=unsure, 3ppl=identity not listed
+#How many ppl are "main tag" ppl & how many are new?
+new <- grep("TAG3", x=sos$SID)
+length(new) #There are 13 new SOS subjects and (77-13=)64 "main tag" sos subjects.
+```
+
+#SOS Questionnaire Scoring - Sam
+```{r}
+
+#FSMI
+fsmi <- sos %>% dplyr::select(SID, contains("FSMI_7"))
+#Fix Labels
+#items out of order & mislabelled
+fsmi.fixed <- fsmi
+fsmi.fixed <- fsmi.fixed %>%
+  rename(FSMI_7_43 = FSMI_7_49, FSMI_7_44 = FSMI_7_50, FSMI_7_45 = FSMI_7_51, 
+         FSMI_7_46 = FSMI_7_52, FSMI_7_47 = FSMI_7_53, FSMI_7_48 = FSMI_7_54, 
+         FSMI_7_49 = FSMI_7_55, FSMI_7_50 = FSMI_7_56, FSMI_7_51 = FSMI_7_57, 
+         FSMI_7_52 = FSMI_7_58, FSMI_7_53 = FSMI_7_59, FSMI_7_54 = FSMI_7_60)
+#note kin care/family subscale is missing from sos dataset
+#Reverse-Scoring
+fsmi.reversed <- fsmi.fixed
+fsmi.reversed[,c("FSMI_7_3","FSMI_7_10","FSMI_7_11","FSMI_7_12","FSMI_7_16","FSMI_7_36","FSMI_7_39","FSMI_7_40","FSMI_7_41","FSMI_7_45","FSMI_7_46","FSMI_7_47","FSMI_7_48")] <- 8-fsmi.fixed[,c("FSMI_7_3","FSMI_7_10","FSMI_7_11","FSMI_7_12","FSMI_7_16","FSMI_7_36","FSMI_7_39","FSMI_7_40","FSMI_7_41","FSMI_7_45","FSMI_7_46","FSMI_7_47","FSMI_7_48")]
+
+#Calculating Subscale Scores
+fsmi.clean <- fsmi.reversed
+fsmi.clean[] <- lapply(fsmi.clean, function(x) as.numeric(as.integer(x)))
+fsmi.clean$SID <- fsmi.reversed$SID
+fsmi.clean$self_protection <- rowMeans(fsmi.clean[,c("FSMI_7_1","FSMI_7_2","FSMI_7_3",
+                                                     "FSMI_7_4","FSMI_7_5","FSMI_7_6")], na.rm = T)
+fsmi.clean$disease_avoidance <- rowMeans(fsmi.clean[,c("FSMI_7_7","FSMI_7_8","FSMI_7_9",
+                                                     "FSMI_7_10","FSMI_7_11","FSMI_7_12")], na.rm = T)
+fsmi.clean$group_affiliation <- rowMeans(fsmi.clean[,c("FSMI_7_13","FSMI_7_14","FSMI_7_15",
+                                                     "FSMI_7_16","FSMI_7_17","FSMI_7_18")], na.rm = T)
+fsmi.clean$exclusion_concern_affiliation <- rowMeans(fsmi.clean[,c("FSMI_7_19","FSMI_7_20","FSMI_7_21",
+                                                     "FSMI_7_22","FSMI_7_23","FSMI_7_24")], na.rm = T)
+fsmi.clean$independence_affiliation <- rowMeans(fsmi.clean[,c("FSMI_7_25","FSMI_7_26","FSMI_7_27",
+                                                     "FSMI_7_28","FSMI_7_29","FSMI_7_30")], na.rm = T)
+fsmi.clean$status <- rowMeans(fsmi.clean[,c("FSMI_7_31","FSMI_7_32","FSMI_7_33",
+                                                     "FSMI_7_34","FSMI_7_35","FSMI_7_36")], na.rm = T)
+fsmi.clean$mate_seeking <- rowMeans(fsmi.clean[,c("FSMI_7_37","FSMI_7_38","FSMI_7_39",
+                                                     "FSMI_7_40","FSMI_7_41","FSMI_7_42")], na.rm = T)
+fsmi.clean$general_mate_retention <- rowMeans(fsmi.clean[,c("FSMI_7_43","FSMI_7_44","FSMI_7_45",
+                                                     "FSMI_7_46","FSMI_7_47","FSMI_7_48")], na.rm = T)
+fsmi.clean$breakup_concern_mate_retention <- rowMeans(fsmi.clean[,c("FSMI_7_49","FSMI_7_50","FSMI_7_51",
+                                                     "FSMI_7_52","FSMI_7_53","FSMI_7_54")], na.rm = T)
+
+#SRQ
+srq <- sos %>% dplyr::select(SID, K_SRQ_9, K_SRQ_19, K_SRQ_23)
+srq.clean <- srq
+srq.clean[] <- lapply(srq, function(x) as.numeric(as.integer(x)))
+srq.clean$SID <- srq$SID
+srq.clean$average.srq <- rowMeans(srq.clean[,c("K_SRQ_9","K_SRQ_19","K_SRQ_23")], na.rm = T)
+
+#SOI
+soi <- sos %>% dplyr::select(SID, contains("K-SOIR")) #note: initial ~30 subjects only saw these items if they endorsed having 'ever hooked up with someone'. There is A LOT of missing data.
+soi.clean <- soi
+soi.clean[] <- lapply(soi, function(x) as.numeric(as.integer(x)))
+soi.clean$SID <- soi$SID
+
+#Reverse-Scoring & removing extra vars
+soi.reversed <- soi.clean[,c(1,4:12)]
+soi.reversed[,c("K-SOIR_9")] <- 6-soi.clean[,c("K-SOIR_9")]
+
+#Facet & Total Composite Scores
+soi.reversed$behavior <- rowMeans(soi.reversed[,c("K-SOIR_4","K-SOIR_5","K-SOIR_6")], na.rm = T)
+soi.reversed$attitude <- rowMeans(soi.reversed[,c("K-SOIR_7","K-SOIR_8","K-SOIR_9")], na.rm = T)
+soi.reversed$desire <- rowMeans(soi.reversed[,c("K-SOIR_10","K-SOIR_11","K-SOIR_12")], na.rm = T)
+soi.reversed$total <- rowMeans(soi.reversed[,c("K-SOIR_4","K-SOIR_5","K-SOIR_6",
+                                               "K-SOIR_7","K-SOIR_8","K-SOIR_9",
+                                               "K-SOIR_10","K-SOIR_11","K-SOIR_12")], na.rm = T)
+
+#Cronbach's Alpha for SOI Facet & Total Scores
+cronbach.alpha(data=soi.reversed[,c("K-SOIR_4","K-SOIR_5","K-SOIR_6")], CI = T, na.rm=T)
+#behavior facet... alpha=0.802 95CI: 0.703, 0.883
+cronbach.alpha(data=soi.reversed[,c("K-SOIR_7","K-SOIR_8","K-SOIR_9")], CI = T, na.rm=T)
+#attitude facet... alpha=0.784 95CI: 0.548, 0.896
+cronbach.alpha(data=soi.reversed[,c("K-SOIR_10","K-SOIR_11","K-SOIR_12")], CI = T, na.rm=T)
+#desire facet... alpha=0.891 95CI: 0.792, 0.946
+cronbach.alpha(data=soi.reversed[,c("K-SOIR_4","K-SOIR_5","K-SOIR_6",
+                                    "K-SOIR_7","K-SOIR_8","K-SOIR_9",
+                                    "K-SOIR_10","K-SOIR_11","K-SOIR_12")], CI = T, na.rm=T)
+#total score... alpha=0.826 95CI: 0.686, 0.895
+
+#is there a better way to score SOI?
+M <- cor(soi.reversed[,2:10], use = "pairwise.complete.obs")
+colnames(M) <- c("SOI-1","SOI-2","SOI-3","SOI-4","SOI-5","SOI-6","SOI-7","SOI-8","SOI-9")
+corrplot(M, method = "color")
+
+#checking factorability
+mat <- soi.reversed[,2:10] %>% na.omit()
+KMO(r=cor(mat))
+#KMO=0.67... it is "okay" to do a factor analysis
+cortest.bartlett(mat)
+det(cor(mat)) #pos determinant... factor analysis should run
+
+#how many factors should we extract?
+parallel <- fa.parallel(mat) #2 factors, although there's an ultra heywood case.
+
+#Factor Analysis
+fa.none <- fa(r=mat, 
+ nfactors = 2, 
+ # covar = FALSE, SMC = TRUE,
+ fm="pa", # type of factor analysis we want to use ("pa" is principal axis factoring)
+ max.iter=100, # (50 is the default, but we have changed it to 100
+ rotate="varimax") # none rotation
+print(fa.none)
+
+fa.diagram(fa.none)
+# The data suggest only 2 factors... items 1-6 = 1st factor & items 7-9 = 2nd factor.
+
+fa.none$communality
+100*fa.none$e.values[1:2]/length(fa.none$e.values) # a 2 factor solution accounts for about 2/3rds of the variance in the data
+```
+
+## Starting the EFA - Katie
+```{r}
+#gathering questionnaire data
+efa_data <- left_join(fsmi.clean,srq.clean,by="SID") #%>% left_join(soi.reversed, by="SID")
+efa_data.cleaned <- efa_data %>% dplyr::select(SID, contains(c("FSMI_7","K_SRQ")))
+
+#only get the variables of interest
+
+efa_items <- efa_data.cleaned %>%
+  dplyr::select(SID,
+                K_SRQ_9, K_SRQ_19, K_SRQ_23,
+                FSMI_7_37:FSMI_7_42)
+
+#How many NA's per column: 
+sapply(efa_items, function(x) sum(is.na(x)))
+
+#imputing missing data
+library(mice)
+impdata <- mice(efa_items,m=5,maxit=50,meth='pmm',seed=500)
+summary(impdata)
+impdata_all <- complete(impdata,1)
+
+impdata_items <- impdata_all %>% 
+  dplyr::select(K_SRQ_9, K_SRQ_19, K_SRQ_23,
+                FSMI_7_37:FSMI_7_42)#FSMI_7_54)
+
+#Descriptives
+
+#Correlation Matrix - look at correlations between items to see if efa is even worth it / justified
+cor_data_matrix <- cor(impdata_items) 
+
+corrplot(cor_data_matrix, method="color")
+#corrplot(cor_data_matrix, method="number")
+
+
+#check if efa should be run
+check_factorstructure(impdata_items)
+
+
+#what number of factors are advisable - what is recommended number of factors
+factors_exp <- n_factors(impdata_items)
+factors_exp
+#This reveals 8 factors in this dataset
+
+```
+
+#EFA
+
+```{r}
+#Force an EFA of 1 factor - 1 factor EFA
+
+efa_1fac <- psych::fa(impdata_items, nfactors = 1) %>%
+  model_parameters(sort = TRUE, threshold = "max")
+efa_1fac
+
+#EFA factor loading cutoff by sample size. 70=.65
+
+
+#Check reliability (alpha)
+
+```
+
+# Scree Plot - didn't work
+
+```{r}
+screeplot <- fa(data_efa_clean, nfactors = ncol(X), rotate = "none")
+n_factors <- length(screeplot$e.values)
+scree     <- data.frame(
+  Factor_n =  as.factor(1:n_factors), 
+  Eigenvalue = screeplot$e.values)
+ggplot(scree, aes(x = Factor_n, y = Eigenvalue, group = 1)) + 
+  geom_point() + geom_line() +
+  xlab("Number of factors") +
+  ylab("Initial eigenvalue") +
+  labs( title = "Scree Plot", 
+        subtitle = "(Based on the unreduced correlation matrix)")
+
+```
+
+# RUN A PCA instead - data reduction method
+```{r}
+
+#pca
+pca <- pca(cor_data_matrix,
+              nfactors = 2)
+print(pca)
+summary(pca)
+
+?pca
+
+#checking factorability
+KMO(r=cor(impdata_items[,])) #welp, thats the problem. fsmi isn't factorable. so... thoughts?
+
+
+
+```

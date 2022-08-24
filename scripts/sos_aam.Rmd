@@ -1,0 +1,23 @@
+---
+title: "AAM"
+author: "Sarah Donaldson"
+date: '2022-08-07'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(rio)
+
+```
+
+```{r import}
+
+sos_qs <- import(here("data", "sos_qs.csv"))
+
+sos_aam <- import(here("data", "sos_aam.csv"))
+
+
+```

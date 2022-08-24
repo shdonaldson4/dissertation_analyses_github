@@ -1,0 +1,202 @@
+---
+title: "2b_mediation"
+author: "Sarah Donaldson"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(knitr)
+library(psych)
+library(dplyr)
+library(here)
+library(rio)
+library(psych)
+library(corrplot)
+library(parameters)
+library(nFactors)
+library(ggplot2)
+library(expss)
+library(ltm)
+library(GPArotation)
+library(mice)
+library(tidyverse)
+library(janitor)
+```
+
+#THIS FILE USES IMPUTED DATA. PLEASE DO NOT RUN ANY CODE BEFORE THE IMPUTATION OR THE NUMBERS WILL BE SLIGHTLY OFF. INSTEAD, START BY LOADING THE IMPUTED DATASET (LINE 100ISH)
+
+## Create Dataset
+
+```{r cars}
+fsmi <- import(here("data", "fsmi_w3.csv")) 
+fsmi <- fsmi %>% 
+  mutate(SID=as.factor(SID))
+ksrq <- import(here("data", "ksrq_w3_mate.csv"))
+ksrq <- ksrq %>% 
+  mutate(SID=as.factor(SID))
+basal_est <- import(here("data", "Saliva_basal_W1W2W3.csv"))
+basal_est <- basal_est %>% 
+  mutate(SID=as.factor(SID))
+age <- import(here("data", "W1_W2_W3_age_long.csv"))
+aam <- import(here("data", "Age_at_menarche.csv"))
+aam <- aam %>% 
+  mutate(SID=as.factor(SID))
+pubcomp <- import(here("data","Allwaves_PubertyComposite_updated.csv"))
+pubcomp <- pubcomp  %>% 
+  filter(wave==3) %>% 
+  dplyr::select(SID,PUBcomp) %>% 
+  mutate(SID=as.factor(SID))
+
+w3age <- age %>% 
+  mutate(SID=as.factor(SID)) %>% 
+  filter(wave==3) %>%
+  dplyr::select(SID,age)
+w3age$w3_age <- w3age$age
+
+
+fsmi_srq <- merge(fsmi, ksrq, by = "SID", all.x = TRUE, all.y = TRUE )
+qs_saliva <- merge(fsmi_srq, basal_est, by = "SID", all.x = TRUE, all.y = TRUE)
+age_qs_saliva <- merge(qs_saliva, w3age[ , c("SID", "w3_age")], by = "SID", all.x=TRUE, all.y = TRUE)
+ages_qs_saliva <- merge(age_qs_saliva, aam[ , c("SID", "age_menarche")], by = "SID", all.x=TRUE, all.y = TRUE)
+all_var <- merge(ages_qs_saliva, pubcomp[ , c("SID", "PUBcomp")], by = "SID", all.x=TRUE, all.y = TRUE)
+
+
+write.csv(all_var, "/Users/sarahdonaldson/Dropbox/UOregon/Pfeiffer Lab/Dissssssss/dissertation_analyses//data/ch2_allvar.csv")
+
+```
+
+## Impute all
+
+```{r impute}
+ch2b_med <- import(here("data", "ch2b_med.csv")) 
+ch2b_med <- ch2b_med %>% 
+  mutate(SID=as.factor(SID))
+
+library(mice)
+impdata <- mice(ch2b_med,m=5,maxit=50,meth='pmm',seed=500)
+summary(impdata)
+
+ch2b_med_imp <- complete(impdata,1)
+
+
+write.csv(ch2b_med_imp, "/Users/sarahd/Dropbox/UOregon/Pfeiffer Lab/Dissssssss/dissertation_analyses/data/ch2b_med_imp.csv")
+```
+
+##pdss by T
+```{r plot}
+library(tidyverse)
+library(rio)
+library(stringr)
+library(readxl)
+library(purrr)
+
+ch2b_med_imp <- import(here("data", "ch2b_med_imp.csv"))
+pubcomp <- import(here("data","Allwaves_PubertyComposite_updated.csv")) %>% 
+  mutate(wave=as.character(wave))
+
+ch2b_plot <- ch2b_med_imp %>% 
+  dplyr::select(SID,"T_w1" = TESTcoef_imp_wave1,
+                "T_w2" = TESTcoef_imp_wave2,
+                "T_w3" = TESTcoef_imp_wave3) %>% 
+  arrange(SID)
+
+#pivot longer to group by SID
+basal_longer <- ch2b_plot %>%
+  pivot_longer(!SID, names_to = c('.value', 'wave'),
+               names_sep = '_w')
+
+#add pdss, join by SID and wave
+ch2bplot_pds <- basal_longer %>% 
+  left_join(pubcomp, by = c('SID', 'wave')) %>% 
+  arrange(SID, wave) 
+
+cor(ch2bplot_pds$pdss, ch2bplot_pds$T, use="pairwise.complete.obs")
+
+ch2bplot_pds %>% 
+  ggplot(aes(x=pdss, y = T, color = SID)) +
+  geom_line(aes(group = SID), alpha = 0.3, size = 0.3) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = 'lm', color = 'black', size = 0.5, alpha = 0.3) +
+  geom_label(label=paste0('r = ', round(cor(ch2bplot_pds$pdss, ch2bplot_pds$T),3)),
+             x = 4.5, y = 1.45)+ 
+  theme_minimal() +
+  guides(color = FALSE)
+```
+###Conclusion: T shows linear relationship with pdss
+
+##Plot each person's T trajectory across 3 waves
+```{r plot2}
+
+ch2bplot_pds$wave <- as.integer(ch2bplot_pds$wave)
+
+ch2bplot_pds %>%
+  ggplot(aes(x=wave, y = T)) +
+  geom_line(alpha = 0.3, size = 0.3)
+
+
+ch2bplot_pds %>%
+  ggplot(aes(x=wave, y = T, color = SID)) +
+  geom_line(aes(group = SID), alpha = 0.3, size = 0.3) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = 'lm', color = 'black', size = 0.5, alpha = 0.3) +
+  geom_label(label=paste0('r = ', round(cor(ch2bplot_pds$wave, ch2bplot_pds$T),3)),
+             x = 4.5, y = 1.45)+ 
+  theme_minimal() +
+  guides(color = FALSE)
+
+
+#Bloxplot?
+ch2bplot_pds %>%
+  ggplot(aes(x=wave, y = T)) +
+  geom_boxplot() +
+  labs(x = "Wave", y = "T") +
+  geom_smooth(method = "lm")  + 
+  theme_minimal()
+
+```
+#Calculate Tslope
+```{r tslope}
+library(lme4)
+
+ch2b_long <- as.data.frame(ch2bplot_pds)
+
+ch2b_long <- ch2b_long %>% 
+  mutate(wave = as.integer(wave)) %>% 
+  mutate(SID = as.factor(SID))
+  
+Tslope = lmer(T ~ wave + (1 + wave | SID), data=ch2bplot_pds)
+#modelFixedEff(Tslope)
+
+summary(Tslope)
+ranef(Tslope)
+
+Tchange_quad = lmer(T ~ wave + wave^2 + (1 + wave | SID), data=ch2bplot_pds)
+
+anova(Tslope, Tchange_quad)
+
+ranef_T <- as.data.frame(ranef(Tslope))
+head(ranef_T)
+
+#Manually created dataset in excel. Moved ranef(Tslope) to excel to create a data frame. Then added fixed slope (from summary(Tslope) = 0.20098). Tslope variable = random slope + fixed slope.
+
+Tslope_data <- import(here("data", "manual_Tslope.csv"))
+ch2b_med_imp_short <- import(here("data", "ch2b_med_imp_short.csv"))
+
+ch2b_med_short <- merge(ch2b_med_imp_short, Tslope_data, by = "SID")
+
+```
+
+##Run the Mediation
+```{r med}
+#medmod package not available for this version of R. So using jamovi
+
+# results <- med(data, dep = 'withdraw', med = 'affect',
+#             pred = 'estress', label = TRUE, paths = TRUE,
+#             pm = TRUE)
+
+```

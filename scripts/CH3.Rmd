@@ -1,0 +1,365 @@
+---
+title: "Chapter 3"
+author: "Sarah Donaldson"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(janitor)
+library(rio)
+library(tidyverse)
+library(car)
+library(readr)
+library(mice)
+library(corrplot)
+library(olsrr)
+library(MuMIn)
+library(stats)
+library(ggpubr)
+library(rstatix)
+library(datarium)
+
+```
+
+# Import file and create factors
+
+```{r import}
+splt_full <- import(here("data", "splt_full.csv"))
+
+splt_full <- splt_full %>% 
+  mutate(SID = as.factor(SID)) %>%
+  mutate(context = as.factor(context)) %>% 
+  mutate(stim_gender = as.factor(stim_gender)) %>% 
+  mutate(stim_chosen = as.factor(stim_chosen))
+  
+sos_qs <- import(here("data", "sos_mating.csv")) 
+sos_qs <- sos_qs %>% 
+  mutate(SID = as.factor(SID))
+
+sos_aam <- import(here("data", "sos_aam.csv")) 
+sos_aam <- sos_aam %>% 
+  mutate(SID = as.factor(SID))
+
+sos_pub <- import(here("data", "sos_qs_puberty.csv")) 
+sos_pub <- sos_pub %>% 
+  mutate(SID = as.factor(SID))
+
+age_df <- import(here("data", "sos_age_merge.csv")) 
+age_df <- age_df %>% 
+  mutate(SID = as.factor(SID))
+
+sos_t <- import(here("data", "SOS_hormones_sd.csv")) 
+sos_t <- sos_t %>% 
+  mutate(SID = as.factor(SID))
+
+```
+
+#Who are our subjects?
+```{r crosstabs}
+#Also explored in Jamovi
+
+#How many ppl have "hooked up"?
+xtabs(~K_SOIR_1, data=sos_qs) #yes=22, no=51, unsure=2, missing=2
+#How many ppl have had sex?
+xtabs(~K_SOIR_2, data=sos_qs) #yes=4, no=46, unsure=1, missing=26
+#note... skip logic was f-ed. this is probably yes=4, no=70, unsure=1, missing=2
+#How many ppl have ever had a romantic relationship?
+xtabs(~FSMI_1, data = sos_qs) #yes=8+22=30, no=15+32=47 
+#8 sos subjects in a current romantic relationship
+xtabs(~FSMI_2 + FSMI_1, data = sos_qs) #of those 8 ppl, half had current relationships that were less than a month old.
+xtabs(~FSMI_3 + FSMI_1, data = sos_qs) 
+#of the 30 ppl who had ever had a romantic relationship, 2ppl=0 relationships, 5ppl=1 relationship, 
+#9ppl=2 relationships, 4ppl=3 relationships, 5ppl=4 relationships, 3ppl=5 relationships, 2ppl=7 relationships
+#Orientation label?
+xtabs(~FSMI_4, data=sos_qs) # 33ppl=het, 2ppl=gay, 4ppl=bi, 5ppl=unsure, 3ppl=identity not listed, 30ppl=no response
+#Orientation scale?
+xtabs(~FSMI_5, data=sos_qs) # 0ppl=only attracted to F, 3ppl=mostly attracted to F, 4ppl=equally attracted to M & F, 9ppl=mostly attracted to M, 29ppl=only attracted to M, 2ppl=not sure, 30ppl=no response
+#Participant gender?
+xtabs(~FSMI_6, data=sos_qs) # 2ppl=M, 70ppl=F, 2ppl=unsure, 3ppl=identity not listed
+#How many ppl are "main tag" ppl & how many are new?
+new <- grep("TAG3", x=sos_qs$SID)
+length(new) #There are 13 new SOS subjects and (77-13=)64 "main tag" sos subjects.
+
+```
+
+#Calculate scores
+```{r scores}
+###FSMI###
+sos_qs$FSMI_7_39r <- recode(sos_qs$FSMI_7_39, '7=1; 6=2; 5=3; 3=5; 2=6; 1=7')
+sos_qs$FSMI_7_40r <- recode(sos_qs$FSMI_7_40, '7=1; 6=2; 5=3; 3=5; 2=6; 1=7')
+sos_qs$FSMI_7_41r <- recode(sos_qs$FSMI_7_41, '7=1; 6=2; 5=3; 3=5; 2=6; 1=7')
+
+
+sos_qs$mate_seeking <- rowMeans(sos_qs[,c("FSMI_7_37",
+                                          "FSMI_7_38",
+                                          "FSMI_7_39r",
+                                          "FSMI_7_40r",
+                                          "FSMI_7_41r",
+                                          "FSMI_7_42")], na.rm = T)
+
+
+###SRQ###
+sos_qs$average.srq <- rowMeans(sos_qs[,c("K_SRQ_9","K_SRQ_19","K_SRQ_23")], na.rm = T)
+
+
+###SOI###
+# soi <- sos %>% dplyr::select(SID, contains("K-SOIR")) #note: initial ~30 subjects only saw these items if they endorsed having 'ever hooked up with someone'. There is A LOT of missing data.
+# soi.clean <- soi
+# soi.clean[] <- lapply(soi, function(x) as.numeric(as.integer(x)))
+# soi.clean$SID <- soi$SID
+# 
+# #Reverse-Scoring & removing extra vars
+# soi.reversed <- soi.clean[,c(1,4:12)]
+# soi.reversed[,c("K-SOIR_9")] <- 6-soi.clean[,c("K-SOIR_9")]
+# 
+# #Facet & Total Composite Scores
+# soi.reversed$behavior <- rowMeans(soi.reversed[,c("K-SOIR_4","K-SOIR_5","K-SOIR_6")], na.rm = T)
+# soi.reversed$attitude <- rowMeans(soi.reversed[,c("K-SOIR_7","K-SOIR_8","K-SOIR_9")], na.rm = T)
+# soi.reversed$desire <- rowMeans(soi.reversed[,c("K-SOIR_10","K-SOIR_11","K-SOIR_12")], na.rm = T)
+# soi.reversed$total <- rowMeans(soi.reversed[,c("K-SOIR_4","K-SOIR_5","K-SOIR_6",
+#                                                "K-SOIR_7","K-SOIR_8","K-SOIR_9",
+#                                                "K-SOIR_10","K-SOIR_11","K-SOIR_12")], na.rm = T)
+# 
+# #Cronbach's Alpha for SOI Facet & Total Scores
+# cronbach.alpha(data=soi.reversed[,c("K-SOIR_4","K-SOIR_5","K-SOIR_6")], CI = T, na.rm=T)
+# #behavior facet... alpha=0.802 95CI: 0.703, 0.883
+# cronbach.alpha(data=soi.reversed[,c("K-SOIR_7","K-SOIR_8","K-SOIR_9")], CI = T, na.rm=T)
+# #attitude facet... alpha=0.784 95CI: 0.548, 0.896
+# cronbach.alpha(data=soi.reversed[,c("K-SOIR_10","K-SOIR_11","K-SOIR_12")], CI = T, na.rm=T)
+# #desire facet... alpha=0.891 95CI: 0.792, 0.946
+# cronbach.alpha(data=soi.reversed[,c("K-SOIR_4","K-SOIR_5","K-SOIR_6",
+#                                     "K-SOIR_7","K-SOIR_8","K-SOIR_9",
+#                                     "K-SOIR_10","K-SOIR_11","K-SOIR_12")], CI = T, na.rm=T)
+# #total score... alpha=0.826 95CI: 0.686, 0.895
+# 
+# #is there a better way to score SOI?
+# M <- cor(soi.reversed[,2:10], use = "pairwise.complete.obs")
+# colnames(M) <- c("SOI-1","SOI-2","SOI-3","SOI-4","SOI-5","SOI-6","SOI-7","SOI-8","SOI-9")
+# corrplot(M, method = "color")
+# 
+# #checking factorability
+# mat <- soi.reversed[,2:10] %>% na.omit()
+# KMO(r=cor(mat))
+# #KMO=0.67... it is "okay" to do a factor analysis
+# cortest.bartlett(mat)
+# det(cor(mat)) #pos determinant... factor analysis should run
+# 
+# #how many factors should we extract?
+# parallel <- fa.parallel(mat) #2 factors, although there's an ultra heywood case.
+# 
+# #Factor Analysis
+# fa.none <- fa(r=mat, 
+#  nfactors = 2, 
+#  # covar = FALSE, SMC = TRUE,
+#  fm="pa", # type of factor analysis we want to use ("pa" is principal axis factoring)
+#  max.iter=100, # (50 is the default, but we have changed it to 100
+#  rotate="varimax") # none rotation
+# print(fa.none)
+# 
+# fa.diagram(fa.none)
+# # The data suggest only 2 factors... items 1-6 = 1st factor & items 7-9 = 2nd factor.
+# 
+# fa.none$communality
+# 100*fa.none$e.values[1:2]/length(fa.none$e.values) # a 2 factor solution accounts for about 2/3rds of the variance in the data
+
+###SPLT###
+
+sum_data <- splt_full %>% 
+  group_by(SID) %>% 
+  mutate(overall_score = n(stim_chosen == '80'))
+  filter(stim_chosen == '80') %>% 
+  group_by(SID, context, stim_gender) %>% 
+  summarise(score = n())
+sum_data
+
+sum_data <- splt_full %>% 
+  # mutate(overall_score = stim_chosen == '80')
+  filter(stim_chosen == '80') %>% 
+  group_by(SID, context, stim_gender) %>% 
+  summarise(score = n())
+sum_data
+
+#Code below does the same as code above
+# count_data <- splt_full%>% 
+#   filter(stim_chosen == '80') %>% 
+#   count(SID, context)
+
+splt_wide <- sum_data %>% 
+  pivot_wider(
+    names_from = context,
+    values_from = score
+  )
+splt_wide
+
+aam_pub <- merge(sos_aam, sos_pub, by = "SID", all.x = TRUE, all.y = TRUE)
+aam_pub_qs <- merge(aam_pub, sos_qs, by = "SID", all.x = TRUE, all.y = TRUE)
+aam_pub_qs_age <- merge(aam_pub_qs, age_df, by = "SID", all.x = TRUE, all.y = TRUE)
+aam_pub_qs_age_h <- merge(aam_pub_qs_age, sos_t, by = "SID", all.x = TRUE, all.y = TRUE)
+ch3_alldata <- merge(aam_pub_qs_age_h, splt_wide, by = "SID", all.x = TRUE, all.y = TRUE)
+
+
+write.csv(ch3_alldata, "/Users/sarahd/Dropbox/UOregon/Pfeiffer Lab/Dissssssss/dissertation_analyses/data/ch3_alldata.csv")
+
+```
+
+###Unneeded columns removed manually
+
+##Missing Data
+```{r analysis}
+
+#Listwise removal for participants who didn't complete SPLT n=7-10
+#Impute all other missing data
+
+eqn_data <- import(here("data", "ch3_alldata_nona.csv"))
+eqn_data <- eqn_data %>% 
+  mutate(SID = as.factor(SID))
+
+library(mice)
+impdata <- mice(eqn_data,m=5,maxit=50,meth='pmm',seed=500)
+
+eqn_data_imp <- complete(impdata,1)
+
+
+write.csv(eqn_data_imp, "/Users/sarahd/Dropbox/UOregon/Pfeiffer Lab/Dissssssss/dissertation_analyses/data/eqn_data_imp.csv")
+
+
+```
+
+###Descriptives done in jamovi
+
+```{r plots}
+#Investigate relationships
+eqn_data_imp <- import(here("data", "eqn_data_imp.csv")) 
+eqn_data_imp <- eqn_data_imp %>% 
+  mutate(SID = as.factor(SID))
+
+ch3_corr <- import(here("data", "ch3_models.csv"))
+
+ch3_scaled <- ch3_corr %>% 
+  #mutate(aam_years = scale(aam_years, center = T, scale = T)) %>% 
+  mutate(pub_comp = scale(pub_comp, center = T, scale = T))%>% 
+  mutate(mate_seeking = scale(mate_seeking, center = T, scale = T))%>% 
+  mutate(average.srq = scale(average.srq, center = T, scale = T))%>% 
+  #mutate(current_age = scale(current_age, center = T, scale = T)) %>% 
+  mutate(Testosterone_log = scale(Testosterone_log, center = T, scale = T))
+
+cor <- cor(ch3_corr, method = c("spearman"))
+corrplot(cor, method = 'square', order = 'FPC', type = 'lower', diag = FALSE)
+
+#install.packages("PerformanceAnalytics")
+# library(PerformanceAnalytics)
+# chart.Correlation(ch3_log, histogram=TRUE, pch=19)
+
+```
+
+##Mke some models
+```{r dredge}
+names(ch3_scaled)
+
+#Needed for dredge to run successfully
+options(na.action = "na.fail")
+
+#Create the global model
+overall_model <- lm(mating~aam_years + pub_comp + mate_seeking + average.srq + current_age + Testosterone_log + neutral, data = ch3_scaled)
+summary(overall_model)
+
+#Test for multicolinearity
+ols_vif_tol(overall_model)
+
+#Dredge
+dd <- dredge(global.model = overall_model, fixed = "neutral")
+dd
+
+#Visualize dredge
+par(mar = c(3,5,6,4))
+plot(dd, labAsExpr = TRUE)
+
+#Get the "best" model
+summary(get.models(dd, 1)[[1]])
+
+
+```
+
+
+##BUT outcome variable is ordinal (a count variable) and is NOT normally distributed. SO, need to use logistic regression
+```{r logmodels}
+#First need to convert outcome variable to percentage of correct responses (out of total number of trials). There were 384 trials per participant, 183 per context.
+
+#Or can simply use difference scores as outcome
+
+#or use glm with poisson correction for count variables
+
+summary(poisson_learning <- glm(mating ~ aam_years + neutral, data=ch3_scaled))
+
+#check with individual variables first. Both aam and current age should be in the mix
+poisson_aam <- glm(mating ~ aam_years + neutral, data=ch3_scaled)
+summary(poisson_aam)
+
+poisson_current_age <- glm(mating ~ current_age + neutral, data=ch3_scaled)
+summary(poisson_current_age)
+
+poisson_aam_age <- glm(mating ~ aam_years + current_age + neutral, data=ch3_scaled)
+summary(poisson_aam_age)
+```
+
+##Follow up stuff
+```{r}
+
+sos_mating <- import(here("data", "sos_mating.csv"))
+sos_mate_scores <- import(here("data", "sos_mate_scores.csv"))
+sos_pubscores <- import(here("data", "sos_pubscores.csv"))
+SOS_hormones_sd <- import(here("data", "SOS_hormones_sd.csv"))
+sos_mdates <- import(here("data", "sos_mdates.csv"))
+
+sos_mateqs_scores <- merge(sos_mating, sos_mate_scores, by = "SID", all.x = TRUE, all.y = TRUE)
+sos_morescores <- merge(sos_mateqs_scores, sos_pubscores, by = "SID", all.x = TRUE, all.y = TRUE)
+sos_morescores_aam <- merge(sos_morescores, sos_mdates, by = "SID", all.x = TRUE, all.y = TRUE)
+fu_data <- merge(sos_morescores_aam, SOS_hormones_sd, by = "SID", all.x = TRUE, all.y = TRUE)
+
+
+write.csv(fu_data, "/Users/sarahd/Dropbox/UOregon/Pfeiffer Lab/Dissssssss/dissertation_analyses/data/fu_data.csv")
+
+
+
+#stimulus gender x context, no control
+
+splt_wide <- sum_data %>% 
+  pivot_wider(
+    names_from = context,
+    values_from = score
+  )
+
+splt_wide
+
+splt_wide_anova <- splt_wide %>% 
+  pivot_wider(
+    names_from = stim_gender,
+    values_from = c(mating, neutral, status)
+  )
+splt_wide_anova
+
+anova <- as.data.frame(splt_wide_anova)
+
+write.csv(splt_wide_anova, "/Users/sarahd/Dropbox/UOregon/Pfeiffer Lab/Dissssssss/dissertation_analyses/data/ch3_anova.csv")
+
+ggqqplot(splt_wide, "mating", facet.by = "stim_gender")
+ggqqplot(splt_wide, "neutral", facet.by = "stim_gender")
+ggqqplot(splt_wide, "status", facet.by = "stim_gender")
+
+bxp <- ggboxplot(
+  sum_data, x = "context", y = "score",
+  color = "stim_gender", palette = "jco"
+  )
+bxp
+
+
+
+
+
+```
